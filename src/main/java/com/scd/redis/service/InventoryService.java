@@ -158,8 +158,47 @@ public class InventoryService
         }finally {
             stringRedisTemplate.delete(Key);
         }
+        return retMessage + "\t" + "port: " + port;
+    }
 
+    // 4.0版本 每个线程只能删除自己的锁
+    public String sale31(){
+        String retMessage = "";
+        String Key = "RedisLock";
+        String uuidValue = IdUtil.simpleUUID() + ":" + Thread.currentThread().getId();
 
+        // 抢不到的线程要继续重试
+        // while自旋 更加安全
+        // 给锁添加过期时间，更加安全，防止业务挂了没有释放锁，操作需具备原子性
+        // 但是 如果业务时间长 过期时间满足不了 可能会导致其他线程获得还没释放的锁
+        while (Boolean.FALSE.equals(stringRedisTemplate.opsForValue().setIfAbsent(Key, uuidValue, 30L, TimeUnit.SECONDS))){
+            // 暂停20ms
+            try{
+                TimeUnit.MILLISECONDS.sleep(20);
+            }catch(InterruptedException e){
+                e.printStackTrace();
+            }
+        }
+        // stringRedisTemplate.expire(Key, 30L, TimeUnit.SECONDS);
+        try {
+            //1 查询库存信息
+            String result = stringRedisTemplate.opsForValue().get("inventory001");
+            //2 判断库存是否足够
+            Integer inventoryNumber = result == null ? 0 : Integer.parseInt(result);
+            //3 扣减库存
+            if(inventoryNumber > 0) {
+                stringRedisTemplate.opsForValue().set("inventory001",String.valueOf(--inventoryNumber));
+                retMessage = "成功卖出一个商品，库存剩余: "+inventoryNumber;
+                System.out.println(retMessage);
+            }else{
+                retMessage = "商品卖完了，o(╥﹏╥)o";
+            }
+        }finally {
+            // 每个线程只能删除自己的锁
+            if (stringRedisTemplate.opsForValue().get(Key).equalsIgnoreCase(uuidValue)){
+                stringRedisTemplate.delete(Key);
+            }
+        }
         return retMessage + "\t" + "port: " + port;
     }
 }
