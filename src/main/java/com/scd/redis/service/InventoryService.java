@@ -62,6 +62,7 @@ public class InventoryService
             }catch(InterruptedException e){
                 e.printStackTrace();
             }
+            // 递归 容易导致栈溢出
             sale();
         }else{
             // 业务代码
@@ -83,6 +84,42 @@ public class InventoryService
                 stringRedisTemplate.delete(Key);
             }
         }
+
+        return retMessage + "\t" + "port: " + port;
+    }
+
+    public String sale21(){
+        String retMessage = "";
+        String Key = "RedisLock";
+        String uuidValue = IdUtil.simpleUUID() + ":" + Thread.currentThread().getId();
+
+        // 抢不到的线程要继续重试
+        // while自旋 更加安全
+        while (!stringRedisTemplate.opsForValue().setIfAbsent(Key, uuidValue)){
+            // 暂停20ms
+            try{
+                TimeUnit.MILLISECONDS.sleep(20);
+            }catch(InterruptedException e){
+                e.printStackTrace();
+            }
+        }
+        try {
+            //1 查询库存信息
+            String result = stringRedisTemplate.opsForValue().get("inventory001");
+            //2 判断库存是否足够
+            Integer inventoryNumber = result == null ? 0 : Integer.parseInt(result);
+            //3 扣减库存
+            if(inventoryNumber > 0) {
+                stringRedisTemplate.opsForValue().set("inventory001",String.valueOf(--inventoryNumber));
+                retMessage = "成功卖出一个商品，库存剩余: "+inventoryNumber;
+                System.out.println(retMessage);
+            }else{
+                retMessage = "商品卖完了，o(╥﹏╥)o";
+            }
+        }finally {
+            stringRedisTemplate.delete(Key);
+        }
+
 
         return retMessage + "\t" + "port: " + port;
     }
