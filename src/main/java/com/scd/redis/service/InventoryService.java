@@ -1,6 +1,7 @@
 package com.scd.redis.service;
 
 import cn.hutool.core.util.IdUtil;
+import com.scd.redis.myRedisLock.RedisDistributedLock;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,6 +25,7 @@ public class InventoryService
     private String port;
 
     private Lock lock = new ReentrantLock();
+    private Lock redis_lock = new RedisDistributedLock(stringRedisTemplate, "scdLock");
 
     public String sale()
     {
@@ -242,6 +244,31 @@ public class InventoryService
                     "return 0 " +
                     "end";
             stringRedisTemplate.execute(new DefaultRedisScript<>(luaScript, Long.class), Arrays.asList(Key), uuidValue);
+        }
+        return retMessage + "\t" + "port: " + port;
+    }
+
+    // 满足可重入性
+    public String sale4(){
+        String retMessage = "";
+        redis_lock.lock();
+
+
+        try {
+            //1 查询库存信息
+            String result = stringRedisTemplate.opsForValue().get("inventory001");
+            //2 判断库存是否足够
+            Integer inventoryNumber = result == null ? 0 : Integer.parseInt(result);
+            //3 扣减库存
+            if(inventoryNumber > 0) {
+                stringRedisTemplate.opsForValue().set("inventory001",String.valueOf(--inventoryNumber));
+                retMessage = "成功卖出一个商品，库存剩余: "+inventoryNumber;
+                System.out.println(retMessage);
+            }else{
+                retMessage = "商品卖完了，o(╥﹏╥)o";
+            }
+        }finally {
+            redis_lock.unlock();
         }
         return retMessage + "\t" + "port: " + port;
     }
