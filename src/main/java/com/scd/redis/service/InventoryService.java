@@ -5,8 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
+import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -195,9 +197,51 @@ public class InventoryService
             }
         }finally {
             // 每个线程只能删除自己的锁
+            // 但是 判断和del不具备原子性
+            // 需要采用lua脚本将两者原子化
             if (stringRedisTemplate.opsForValue().get(Key).equalsIgnoreCase(uuidValue)){
                 stringRedisTemplate.delete(Key);
             }
+        }
+        return retMessage + "\t" + "port: " + port;
+    }
+
+    public String sale32(){
+        String retMessage = "";
+        String Key = "RedisLock";
+        String uuidValue = IdUtil.simpleUUID() + ":" + Thread.currentThread().getId();
+
+        while (Boolean.FALSE.equals(stringRedisTemplate.opsForValue().setIfAbsent(Key, uuidValue, 30L, TimeUnit.SECONDS))){
+            // 暂停20ms
+            try{
+                TimeUnit.MILLISECONDS.sleep(20);
+            }catch(InterruptedException e){
+                e.printStackTrace();
+            }
+        }
+        try {
+            //1 查询库存信息
+            String result = stringRedisTemplate.opsForValue().get("inventory001");
+            //2 判断库存是否足够
+            Integer inventoryNumber = result == null ? 0 : Integer.parseInt(result);
+            //3 扣减库存
+            if(inventoryNumber > 0) {
+                stringRedisTemplate.opsForValue().set("inventory001",String.valueOf(--inventoryNumber));
+                retMessage = "成功卖出一个商品，库存剩余: "+inventoryNumber;
+                System.out.println(retMessage);
+            }else{
+                retMessage = "商品卖完了，o(╥﹏╥)o";
+            }
+        }finally {
+            // 每个线程只能删除自己的锁
+            // 但是 判断和del不具备原子性
+            // 需要采用lua脚本将两者原子化
+            String luaScript = "if (redis.call('get',KEYS[1]) == ARGV[1]) then " +
+                    "return redis.call('del',KEYS[1]) " +
+                    "else " +
+                    "return 0 " +
+                    "end";
+            stringRedisTemplate.execute(new DefaultRedisScript<>(luaScript, Long.class), Arrays.asList(Key), uuidValue);
         }
         return retMessage + "\t" + "port: " + port;
     }

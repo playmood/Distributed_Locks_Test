@@ -23,6 +23,6 @@ public class InventoryController
     @GetMapping(value = "/inventory/sale")
     public String sale()
     {
-        return inventoryService.sale31();
+        return inventoryService.sale32();
     }
 }
